@@ -51,3 +51,21 @@ ruby > rt {
   font-size: 0.85em;
   color: #555;
 }
+
+figure.figure {
+  margin: 1em 0;
+  text-align: center;
+  page-break-inside: avoid;
+  break-inside: avoid;
+}
+
+figure.figure img {
+  max-width: 100%;
+  height: auto;
+}
+
+figure.figure figcaption {
+  font-size: 0.85em;
+  color: #444;
+  margin-top: 0.3em;
+}

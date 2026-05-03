@@ -4,8 +4,11 @@
 
 - 縦書き / 横書き — OCR結果から自動判定（フラグで上書き可）
 - 右開き / 左開き — 縦書き→`rtl`、横書き→`ltr` を既定で設定
-- ルビ（振り仮名） — 抽出して `<ruby>` 要素として保持
-- 章分け — レイアウト解析の見出し（`section_headings`/`title`）で章を分割
+- ルビ（振り仮名） — 親漢字との bbox 近接で結びつけ、`<ruby>` 要素として埋め込む
+- 挿絵 — `figures` の bbox を PDFから crop して PNG として埋め込む
+- 章分け — レイアウト解析の見出しで章を分割し、極小章・重複タイトルは自動マージ
+- 逆順スキャンPDF — `--reverse-pages` で物理本のページ順に並べ替え
+- 再構築 — OCRした生JSONを保存しておき `--rebuild-from` で再OCRなしに再生成
 
 ## クイックスタート
 
@@ -57,6 +60,15 @@ pdf2epub input.pdf -o output.epub --debug-html debug/ --dump-json doc.json
 
 # 生のYomiToku JSONも保存
 pdf2epub input.pdf -o output.epub --dump-raw-json raw_json/
+
+# 物理本の最終ページから先頭へ逆順にスキャンされたPDF
+pdf2epub input.pdf -o output.epub --reverse-pages
+
+# 挿絵を抜きでテキストのみ抽出
+pdf2epub input.pdf -o output.epub --no-figures
+
+# 既に取得した生JSONからEPUBだけ作り直す（OCRをスキップ、数秒）
+pdf2epub input.pdf -o output.epub --rebuild-from raw_json/
 ```
 
 ## 主要オプション
@@ -77,6 +89,8 @@ pdf2epub input.pdf -o output.epub --dump-raw-json raw_json/
 | `--reverse-pages` | off | PDFが物理本の最終ページから先頭へ逆順にスキャンされている場合に指定 |
 | `--start-page N` | `1` | 開始ページ番号（1始まり） |
 | `--max-pages N` | なし | 先頭Nページのみ処理（動作確認用） |
+| `--no-figures` | off | 挿絵をEPUBに埋め込まない（テキストのみ） |
+| `--rebuild-from DIR` | なし | OCRをスキップし `--dump-raw-json` で保存した生JSONディレクトリから再生成 |
 
 ## 検証
 

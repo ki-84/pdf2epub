@@ -59,3 +59,24 @@ ruby > rt {
   font-size: 0.85em;
   color: #555;
 }
+
+figure.figure {
+  margin: 1em 0.5em;
+  text-align: center;
+  page-break-inside: avoid;
+  break-inside: avoid;
+  -epub-writing-mode: horizontal-tb;
+  writing-mode: horizontal-tb;
+}
+
+figure.figure img {
+  max-width: 90%;
+  max-height: 90%;
+  height: auto;
+}
+
+figure.figure figcaption {
+  font-size: 0.85em;
+  color: #444;
+  margin-top: 0.3em;
+}

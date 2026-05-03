@@ -48,6 +48,8 @@ def _ruby_html(ruby: RubyRun) -> str:
 
 
 def _render_block(block: Block) -> str:
+    if block.role == "figure":
+        return _render_figure(block)
     inner = "".join(_render_run_with_rubies(r) for r in block.runs)
     if block.role == "heading":
         level = max(1, min(block.level or 1, 6))
@@ -57,6 +59,20 @@ def _render_block(block: Block) -> str:
     if block.role == "caption":
         return f'<p class="no-indent"><em>{inner}</em></p>\n'
     return f"<p>{inner}</p>\n"
+
+
+def _render_figure(block: Block) -> str:
+    href = block.image_href or ""
+    caption = "".join(_render_run_with_rubies(r) for r in block.runs).strip()
+    img = f'<img src="{escape(href, {chr(34): "&quot;"})}" alt="figure" />'
+    if caption:
+        return (
+            '<figure class="figure">\n'
+            f"  {img}\n"
+            f"  <figcaption>{caption}</figcaption>\n"
+            "</figure>\n"
+        )
+    return f'<figure class="figure">{img}</figure>\n'
 
 
 def render_chapter_xhtml(chapter: Chapter, *, language: str) -> str:

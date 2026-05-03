@@ -48,6 +48,11 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--no-ruby", action="store_true", help="ルビを抽出しない")
     p.add_argument(
+        "--no-figures",
+        action="store_true",
+        help="挿絵（図表）をEPUBに埋め込まない（テキストのみ）",
+    )
+    p.add_argument(
         "--reverse-pages",
         action="store_true",
         help="PDFが物理本の最終ページから先頭へ逆順にスキャンされている場合に指定",
@@ -86,6 +91,14 @@ def _build_parser() -> argparse.ArgumentParser:
         type=int,
         default=1,
         help="開始ページ番号（1始まり、default: 1）",
+    )
+    p.add_argument(
+        "--rebuild-from",
+        default=None,
+        help=(
+            "OCRをスキップし、--dump-raw-jsonで保存済みのディレクトリから"
+            "EPUBを再生成する（input.pdf は挿絵切抜き用に必要）"
+        ),
     )
     p.add_argument("--version", action="version", version=f"pdf2epub {__version__}")
     return p
@@ -133,22 +146,41 @@ def main(argv: list[str] | None = None) -> int:
         print(f"[pdf2epub] 入力PDFが見つかりません: {args.input}", file=sys.stderr)
         return 2
 
-    device = detect_device(args.device)
-    print(f"[pdf2epub] device = {device}", file=sys.stderr)
-    print(f"[pdf2epub] OCR 実行中: {args.input}", file=sys.stderr)
-
-    pages = list(
-        analyze_pdf(
-            args.input,
-            device=device,
-            ignore_ruby=args.no_ruby,
-            ruby_threshold=args.ruby_threshold,
-            start_page=args.start_page,
-            max_pages=args.max_pages,
-            progress=True,
+    if args.rebuild_from:
+        if not os.path.isdir(args.rebuild_from):
+            print(
+                f"[pdf2epub] --rebuild-from に指定されたディレクトリがありません: {args.rebuild_from}",
+                file=sys.stderr,
+            )
+            return 2
+        json_files = sorted(
+            f for f in os.listdir(args.rebuild_from) if f.endswith(".json")
         )
-    )
-    print(f"[pdf2epub] OCR 完了: {len(pages)} ページ", file=sys.stderr)
+        pages = []
+        for fn in json_files:
+            with open(os.path.join(args.rebuild_from, fn), encoding="utf-8") as fh:
+                pages.append(json.load(fh))
+        print(
+            f"[pdf2epub] 生JSON {len(pages)} ページを {args.rebuild_from} から読込",
+            file=sys.stderr,
+        )
+    else:
+        device = detect_device(args.device)
+        print(f"[pdf2epub] device = {device}", file=sys.stderr)
+        print(f"[pdf2epub] OCR 実行中: {args.input}", file=sys.stderr)
+
+        pages = list(
+            analyze_pdf(
+                args.input,
+                device=device,
+                ignore_ruby=args.no_ruby,
+                ruby_threshold=args.ruby_threshold,
+                start_page=args.start_page,
+                max_pages=args.max_pages,
+                progress=True,
+            )
+        )
+        print(f"[pdf2epub] OCR 完了: {len(pages)} ページ", file=sys.stderr)
 
     if args.dump_raw_json:
         _dump_raw_pages(pages, args.dump_raw_json)
@@ -163,6 +195,8 @@ def main(argv: list[str] | None = None) -> int:
         page_direction=_resolve_page_direction(args.page_direction),  # type: ignore[arg-type]
         keep_ruby=not args.no_ruby,
         reverse_pages=args.reverse_pages,
+        keep_figures=not args.no_figures,
+        page_index_offset=max(0, args.start_page - 1),
     )
     print(
         f"[pdf2epub] writing_mode={doc.writing_mode} page_direction={doc.page_direction} "

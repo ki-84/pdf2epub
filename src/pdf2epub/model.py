@@ -5,7 +5,7 @@ from typing import Literal
 
 WritingMode = Literal["vertical", "horizontal"]
 PageDir = Literal["rtl", "ltr"]
-BlockRole = Literal["heading", "paragraph", "list_item", "caption"]
+BlockRole = Literal["heading", "paragraph", "list_item", "caption", "figure"]
 
 
 @dataclass
@@ -26,6 +26,10 @@ class Block:
     level: int
     runs: list[TextRun]
     direction: WritingMode
+    # Populated only when role == "figure".
+    image_source_page: int | None = None  # 0-indexed PDF page
+    image_bbox: tuple[int, int, int, int] | None = None
+    image_href: str | None = None  # filled in by epub.py at write time
 
 
 @dataclass

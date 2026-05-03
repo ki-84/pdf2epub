@@ -4,19 +4,98 @@ import os
 import re
 import uuid
 import zipfile
+from io import BytesIO
 from pathlib import Path
 
 from ebooklib import epub
 
-from pdf2epub.model import Document
+from pdf2epub.model import Block, Document
 from pdf2epub.render import render_chapter_xhtml, render_colophon_xhtml
 
 _STYLES_DIR = Path(__file__).resolve().parent / "styles"
+
+# Figures larger than this dimension (in source pixels) get downscaled to keep
+# EPUB size manageable. 200dpi A5 page is ~1183x1690, so 1200 keeps full-page
+# diagrams legible without bloating the file.
+FIGURE_MAX_DIM = 1200
 
 
 def _load_css(writing_mode: str) -> str:
     name = "vertical.css" if writing_mode == "vertical" else "horizontal.css"
     return (_STYLES_DIR / name).read_text(encoding="utf-8")
+
+
+def _figure_blocks(doc: Document) -> list[Block]:
+    out: list[Block] = []
+    for ch in doc.chapters:
+        for b in ch.blocks:
+            if b.role == "figure" and b.image_source_page is not None and b.image_bbox:
+                out.append(b)
+    return out
+
+
+def _emit_figure_images(book: epub.EpubBook, doc: Document) -> None:
+    """Render figure crops from the source PDF and add them as EPUB images."""
+    figures = _figure_blocks(doc)
+    if not figures or not doc.source_pdf:
+        return
+    if not Path(doc.source_pdf).exists():
+        return
+
+    try:
+        import pypdfium2
+        from PIL import Image  # noqa: F401
+    except Exception:
+        return
+
+    by_page: dict[int, list[Block]] = {}
+    for i, b in enumerate(figures):
+        b.image_href = f"images/figure_{i + 1:04d}.png"
+        by_page.setdefault(b.image_source_page or 0, []).append(b)
+
+    pdf_doc = pypdfium2.PdfDocument(doc.source_pdf)
+    try:
+        for page_idx in sorted(by_page.keys()):
+            try:
+                page = pdf_doc[page_idx]
+            except Exception:
+                continue
+            try:
+                bitmap = page.render(scale=200 / 72)
+                pil_img = bitmap.to_pil().convert("RGB")
+            finally:
+                try:
+                    page.close()
+                except Exception:
+                    pass
+            for b in by_page[page_idx]:
+                assert b.image_bbox is not None
+                x1, y1, x2, y2 = b.image_bbox
+                # Clamp to image bounds.
+                w, h = pil_img.size
+                x1, y1 = max(0, x1), max(0, y1)
+                x2, y2 = min(w, x2), min(h, y2)
+                if x2 <= x1 or y2 <= y1:
+                    continue
+                crop = pil_img.crop((x1, y1, x2, y2))
+                # Downscale very large figures.
+                cw, ch = crop.size
+                m = max(cw, ch)
+                if m > FIGURE_MAX_DIM:
+                    s = FIGURE_MAX_DIM / m
+                    crop = crop.resize((int(cw * s), int(ch * s)))
+                buf = BytesIO()
+                crop.save(buf, format="PNG", optimize=True)
+                book.add_item(
+                    epub.EpubItem(
+                        uid=f"img_{b.image_href}",
+                        file_name=b.image_href,
+                        media_type="image/png",
+                        content=buf.getvalue(),
+                    )
+                )
+    finally:
+        pdf_doc.close()
 
 
 def build_epub(doc: Document, output_path: str) -> None:
@@ -35,6 +114,9 @@ def build_epub(doc: Document, output_path: str) -> None:
         content=_load_css(doc.writing_mode),
     )
     book.add_item(css_item)
+
+    # Emit figure images first so chapters can reference them via image_href.
+    _emit_figure_images(book, doc)
 
     chapter_items: list[epub.EpubHtml] = []
     for i, chapter in enumerate(doc.chapters, start=1):
