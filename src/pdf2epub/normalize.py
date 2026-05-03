@@ -58,6 +58,46 @@ def _direction_of(p: dict[str, Any]) -> WritingMode | None:
     return None
 
 
+# Heuristic header/footer detection ----------------------------------------------
+# Yomitoku assigns the role "page_header" to many running headers, but the same
+# header text on other pages can leak through as "section_headings" or have no
+# role at all, ending up inserted between body paragraphs (e.g. the running
+# title "量 子 革 命" splitting "エネルギ" / "ー保存則"). We therefore treat any
+# short paragraph that lives near the top/bottom edge AND appears on several
+# pages as a recurring header to be dropped.
+RECURRING_MIN_PAGES = 3
+RECURRING_MAX_CHARS = 30
+EDGE_Y_TOP = 110     # paragraphs whose y2 <= this are likely top headers (200dpi)
+EDGE_Y_BOTTOM = 1080 # paragraphs whose y1 >= this are likely bottom footers
+
+
+def _normalized_text(text: str) -> str:
+    return re.sub(r"\s+", "", text or "")
+
+
+def detect_recurring_headers(pages: Iterable[dict[str, Any]]) -> set[str]:
+    """Return normalized texts that should be treated as page headers/footers."""
+    counts: Counter[str] = Counter()
+    for page in pages:
+        seen_on_page: set[str] = set()
+        for p in _paragraphs(page):
+            box = p.get("box") or [0, 0, 0, 0]
+            if len(box) != 4:
+                continue
+            text = (p.get("contents") or "").strip()
+            if not text or len(text) > RECURRING_MAX_CHARS:
+                continue
+            y1, y2 = box[1], box[3]
+            near_edge = y2 <= EDGE_Y_TOP or y1 >= EDGE_Y_BOTTOM
+            if not near_edge:
+                continue
+            norm = _normalized_text(text)
+            if norm and norm not in seen_on_page:
+                counts[norm] += 1
+                seen_on_page.add(norm)
+    return {t for t, c in counts.items() if c >= RECURRING_MIN_PAGES}
+
+
 def detect_writing_mode(pages: Iterable[dict[str, Any]]) -> WritingMode:
     counter: Counter[str] = Counter()
     for page in pages:
@@ -116,12 +156,16 @@ def _is_ruby_text(text: str) -> bool:
 
 
 def _box_inside(inner: tuple[int, int, int, int], outer: list[int] | tuple[int, ...]) -> bool:
+    """Use the inner box's center point — Yomitoku word boxes commonly extend
+    a few pixels past their paragraph box because of ruby/diacritic glyphs."""
     if len(outer) != 4:
         return False
     ox1, oy1, ox2, oy2 = outer
     ix1, iy1, ix2, iy2 = inner
+    cx = (ix1 + ix2) / 2
+    cy = (iy1 + iy2) / 2
     pad = 4
-    return ix1 >= ox1 - pad and iy1 >= oy1 - pad and ix2 <= ox2 + pad and iy2 <= oy2 + pad
+    return ox1 - pad <= cx <= ox2 + pad and oy1 - pad <= cy <= oy2 + pad
 
 
 def _nearest_kanji_index(text: str, idx: int) -> int | None:
@@ -146,12 +190,20 @@ def _word_score(
     px1, py1, px2, py2 = parent_box
     rx1, ry1, rx2, ry2 = ruby_box
     if mode == "vertical":
-        # Ruby sits to the right of the parent column.
+        # Ruby's vertical span must lie inside the parent's vertical span.
         if ry1 < py1 - 6 or ry2 > py2 + 6:
             return None
+        # Case A: ruby sits just outside (or slightly biting into) the
+        # parent's right edge — the typical case when Yomitoku splits the
+        # ruby from the body column entirely.
         gap = rx1 - px2
         if -RUBY_INSIDE_TOL <= gap <= RUBY_OUTSIDE_TOL:
             return abs(gap)
+        # Case B: the parent column's bbox already encloses the ruby
+        # because Yomitoku grouped them into the same word/column. The ruby
+        # then sits flush against the parent's right edge.
+        if rx1 > px1 and abs(rx2 - px2) <= 8:
+            return 2.0
         return None
     else:
         # Ruby sits above the parent line.
@@ -160,6 +212,8 @@ def _word_score(
         gap = py1 - ry2
         if -RUBY_INSIDE_TOL <= gap <= RUBY_OUTSIDE_TOL:
             return abs(gap)
+        if ry1 > py1 and abs(ry2 - py2) <= 8:
+            return 2.0
         return None
 
 
@@ -305,12 +359,16 @@ def _para_to_block(
     keep_ruby: bool,
     bbox_rubies: list[tuple[str, str]] | None = None,
     ruby_strings: list[str] | None = None,
+    recurring_headers: set[str] | None = None,
 ) -> Block | None:
     role = _classify_role(p.get("role"))
     if role is None:
         return None
     text = (p.get("contents") or "").strip()
     if not text:
+        return None
+    if recurring_headers and _normalized_text(text) in recurring_headers:
+        # Header/footer leak through with role section_headings or no role.
         return None
 
     if ruby_strings:
@@ -390,6 +448,8 @@ def build_document(
     mode = writing_mode or detect_writing_mode(pages)
     direction = page_direction or page_dir_for(mode)
 
+    recurring_headers = detect_recurring_headers(pages)
+
     enum_pages = list(enumerate(pages))
     if reverse_pages:
         enum_pages.reverse()
@@ -430,11 +490,14 @@ def build_document(
                     keep_ruby=keep_ruby,
                     bbox_rubies=rubies_per_parent.get(id(payload)),
                     ruby_strings=ruby_strings_per_parent.get(id(payload)),
+                    recurring_headers=recurring_headers,
                 )
             else:
                 block = _figure_to_block(payload, page_index, mode)
             if block is not None:
                 blocks.append(block)
+
+    blocks = _merge_continuation_paragraphs(blocks)
 
     chapters = _split_into_chapters(blocks)
     if not chapters:
@@ -449,6 +512,39 @@ def build_document(
         source_pdf=pdf_path,
         author=author,
     )
+
+
+_SENTENCE_END_RE = re.compile(r"[。．！？\?\!」』）)】〕\]…]\s*$")
+
+
+def _merge_continuation_paragraphs(blocks: list[Block]) -> list[Block]:
+    """Merge body paragraphs that look like sentence continuations.
+
+    Yomitoku splits paragraphs at every PDF column / page break. When the
+    previous paragraph does not end with a sentence-final mark, treat the
+    next same-direction body paragraph as the continuation and concatenate.
+    """
+    if not blocks:
+        return blocks
+
+    out: list[Block] = []
+    for b in blocks:
+        if b.role != "paragraph" or not out:
+            out.append(b)
+            continue
+        prev = out[-1]
+        if prev.role != "paragraph" or prev.direction != b.direction:
+            out.append(b)
+            continue
+        prev_tail = (prev.runs[-1].text if prev.runs else "").rstrip()
+        if not prev_tail or _SENTENCE_END_RE.search(prev_tail):
+            out.append(b)
+            continue
+        # Continuation: append b's runs to prev. Avoid leaving a stray newline
+        # at the join point.
+        prev.runs[-1].text = prev_tail
+        prev.runs.extend(b.runs)
+    return out
 
 
 MIN_CHAPTER_BODY_BLOCKS = 2  # ヘディングを除いた本文ブロックの最少数

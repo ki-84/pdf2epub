@@ -47,18 +47,31 @@ def _ruby_html(ruby: RubyRun) -> str:
     )
 
 
-def _render_block(block: Block) -> str:
+def _block_attrs(block: Block, doc_writing_mode: str) -> str:
+    """When a block's direction differs from the document's writing mode,
+    pin the block to its own writing mode so figure captions, sidenotes,
+    formulas etc. render in the right orientation."""
+    if block.direction and block.direction != doc_writing_mode:
+        if block.direction == "horizontal":
+            return ' class="block-horizontal"'
+        if block.direction == "vertical":
+            return ' class="block-vertical"'
+    return ""
+
+
+def _render_block(block: Block, doc_writing_mode: str = "vertical") -> str:
     if block.role == "figure":
         return _render_figure(block)
     inner = "".join(_render_run_with_rubies(r) for r in block.runs)
+    attrs = _block_attrs(block, doc_writing_mode)
     if block.role == "heading":
         level = max(1, min(block.level or 1, 6))
-        return f"<h{level}>{inner}</h{level}>\n"
+        return f"<h{level}{attrs}>{inner}</h{level}>\n"
     if block.role == "list_item":
-        return f"<ul><li>{inner}</li></ul>\n"
+        return f"<ul{attrs}><li>{inner}</li></ul>\n"
     if block.role == "caption":
-        return f'<p class="no-indent"><em>{inner}</em></p>\n'
-    return f"<p>{inner}</p>\n"
+        return f'<p class="no-indent"{attrs}><em>{inner}</em></p>\n'
+    return f"<p{attrs}>{inner}</p>\n"
 
 
 def _render_figure(block: Block) -> str:
@@ -75,8 +88,10 @@ def _render_figure(block: Block) -> str:
     return f'<figure class="figure">{img}</figure>\n'
 
 
-def render_chapter_xhtml(chapter: Chapter, *, language: str) -> str:
-    body = "".join(_render_block(b) for b in chapter.blocks)
+def render_chapter_xhtml(
+    chapter: Chapter, *, language: str, doc_writing_mode: str = "vertical"
+) -> str:
+    body = "".join(_render_block(b, doc_writing_mode) for b in chapter.blocks)
     return XHTML_TEMPLATE.format(
         lang=escape(language, {'"': "&quot;"}),
         title=escape(chapter.title or ""),

@@ -60,6 +60,14 @@ ruby > rt {
   color: #555;
 }
 
+.block-horizontal {
+  -epub-writing-mode: horizontal-tb;
+  writing-mode: horizontal-tb;
+  -webkit-writing-mode: horizontal-tb;
+  text-indent: 0;
+  margin: 0.4em 0;
+}
+
 figure.figure {
   margin: 1em 0.5em;
   text-align: center;

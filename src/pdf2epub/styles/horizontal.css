@@ -52,6 +52,12 @@ ruby > rt {
   color: #555;
 }
 
+.block-vertical {
+  -epub-writing-mode: vertical-rl;
+  writing-mode: vertical-rl;
+  -webkit-writing-mode: vertical-rl;
+}
+
 figure.figure {
   margin: 1em 0;
   text-align: center;

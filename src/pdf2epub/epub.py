@@ -125,7 +125,9 @@ def build_epub(doc: Document, output_path: str) -> None:
             file_name=f"chap_{i:03d}.xhtml",
             lang=doc.language,
         )
-        item.content = render_chapter_xhtml(chapter, language=doc.language)
+        item.content = render_chapter_xhtml(
+            chapter, language=doc.language, doc_writing_mode=doc.writing_mode
+        )
         item.add_item(css_item)
         book.add_item(item)
         chapter_items.append(item)
