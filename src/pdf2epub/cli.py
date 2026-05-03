@@ -74,6 +74,15 @@ def _build_parser() -> argparse.ArgumentParser:
         help="挿絵をグレースケールで保存 (e-inkリーダーでファイルサイズ削減)",
     )
     p.add_argument(
+        "--xteink",
+        action="store_true",
+        help=(
+            "XTEINK X4 / Cross Point firmware 向け既定値で出力する: "
+            "baseline JPEG, 480px box, グレースケール。"
+            "他のフラグより優先される"
+        ),
+    )
+    p.add_argument(
         "--reverse-pages",
         action="store_true",
         help="PDFが物理本の最終ページから先頭へ逆順にスキャンされている場合に指定",
@@ -233,12 +242,21 @@ def main(argv: list[str] | None = None) -> int:
         _dump_debug_html(doc, args.debug_html)
         print(f"[pdf2epub] 中間XHTML: {args.debug_html}", file=sys.stderr)
 
+    if args.xteink:
+        image_format = "jpeg"
+        image_max_dim = 480
+        image_grayscale = True
+    else:
+        image_format = args.image_format
+        image_max_dim = args.image_max_dim
+        image_grayscale = args.image_grayscale
+
     build_epub(
         doc,
         args.output,
-        image_format=args.image_format,
-        image_max_dim=args.image_max_dim,
-        image_grayscale=args.image_grayscale,
+        image_format=image_format,
+        image_max_dim=image_max_dim,
+        image_grayscale=image_grayscale,
     )
     print(f"[pdf2epub] EPUB 出力: {args.output}", file=sys.stderr)
     return 0

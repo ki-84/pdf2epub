@@ -96,16 +96,20 @@ def _render_block(block: Block, doc_writing_mode: str = "vertical") -> str:
 
 def _render_figure(block: Block) -> str:
     href = block.image_href or ""
-    caption = "".join(_render_run_with_rubies(r) for r in block.runs).strip()
-    img = f'<img src="{escape(href, {chr(34): "&quot;"})}" alt="figure" />'
+    caption = "".join(_render_run_with_rubies(r, "horizontal") for r in block.runs).strip()
+    src = escape(href, {chr(34): "&quot;"})
+    # Use plain <div>/<p> instead of <figure>/<figcaption>: low-end e-ink
+    # readers (XTEINK X4 / Cross Point firmware) often parse only EPUB-2-era
+    # tags and silently drop the entire <figure> subtree, hiding the image.
+    img = f'<img src="{src}" alt="figure"/>'
     if caption:
         return (
-            '<figure class="figure">\n'
+            '<div class="figure">\n'
             f"  {img}\n"
-            f"  <figcaption>{caption}</figcaption>\n"
-            "</figure>\n"
+            f'  <p class="figcaption">{caption}</p>\n'
+            "</div>\n"
         )
-    return f'<figure class="figure">{img}</figure>\n'
+    return f'<div class="figure">{img}</div>\n'
 
 
 def render_chapter_xhtml(

@@ -58,20 +58,21 @@ ruby > rt {
   -webkit-writing-mode: vertical-rl;
 }
 
-figure.figure {
+.figure {
   margin: 1em 0;
   text-align: center;
   page-break-inside: avoid;
   break-inside: avoid;
 }
 
-figure.figure img {
+.figure img {
   max-width: 100%;
   height: auto;
 }
 
-figure.figure figcaption {
+.figcaption {
   font-size: 0.85em;
   color: #444;
-  margin-top: 0.3em;
+  margin: 0.3em 0 0;
+  text-indent: 0;
 }

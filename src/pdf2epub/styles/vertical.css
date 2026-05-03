@@ -68,7 +68,7 @@ ruby > rt {
   margin: 0.4em 0;
 }
 
-figure.figure {
+.figure {
   margin: 1em 0.5em;
   text-align: center;
   page-break-inside: avoid;
@@ -77,14 +77,14 @@ figure.figure {
   writing-mode: horizontal-tb;
 }
 
-figure.figure img {
-  max-width: 90%;
-  max-height: 90%;
+.figure img {
+  max-width: 100%;
   height: auto;
 }
 
-figure.figure figcaption {
+.figcaption {
   font-size: 0.85em;
   color: #444;
-  margin-top: 0.3em;
+  margin: 0.3em 0 0;
+  text-indent: 0;
 }

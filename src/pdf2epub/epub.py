@@ -94,11 +94,19 @@ def _emit_figure_images(
                 if x2 <= x1 or y2 <= y1:
                     continue
                 crop = pil_img.crop((x1, y1, x2, y2))
-                cw, ch_ = crop.size
-                m = max(cw, ch_)
-                if m > image_max_dim:
-                    s = image_max_dim / m
-                    crop = crop.resize((int(cw * s), int(ch_ * s)))
+                # Apply EXIF orientation, then flatten any alpha against
+                # white (e-ink readers can't decode transparency reliably).
+                from PIL import Image as PILImage, ImageOps
+                crop = ImageOps.exif_transpose(crop)
+                if crop.mode in ("RGBA", "LA", "P"):
+                    flat = PILImage.new("RGB", crop.size, (255, 255, 255))
+                    flat.paste(crop.convert("RGBA"), mask=crop.convert("RGBA").split()[-1])
+                    crop = flat
+                # thumbnail() clamps BOTH axes (fit-inside box). For an
+                # XTEINK X4 (480x800 panel) pass --image-max-dim 480 so
+                # both width and height stay within the screen.
+                if max(crop.size) > image_max_dim:
+                    crop.thumbnail((image_max_dim, image_max_dim), PILImage.LANCZOS)
                 if image_grayscale:
                     crop = crop.convert("L")
                 buf = BytesIO()
