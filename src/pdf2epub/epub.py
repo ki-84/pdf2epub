@@ -49,8 +49,11 @@ def _emit_figure_images(book: epub.EpubBook, doc: Document) -> None:
         return
 
     by_page: dict[int, list[Block]] = {}
-    for i, b in enumerate(figures):
-        b.image_href = f"images/figure_{i + 1:04d}.png"
+    for i, b in enumerate(figures, start=1):
+        b.image_href = f"images/figure_{i:04d}.png"
+        # Stash a sanitized uid (used for OPF item id; must be a valid
+        # XML NCName — no '/' or ':' allowed).
+        setattr(b, "_image_uid", f"img_{i:04d}")
         by_page.setdefault(b.image_source_page or 0, []).append(b)
 
     pdf_doc = pypdfium2.PdfDocument(doc.source_pdf)
@@ -87,8 +90,8 @@ def _emit_figure_images(book: epub.EpubBook, doc: Document) -> None:
                 buf = BytesIO()
                 crop.save(buf, format="PNG", optimize=True)
                 book.add_item(
-                    epub.EpubItem(
-                        uid=f"img_{b.image_href}",
+                    epub.EpubImage(
+                        uid=getattr(b, "_image_uid", f"img_{id(b):x}"),
                         file_name=b.image_href,
                         media_type="image/png",
                         content=buf.getvalue(),
