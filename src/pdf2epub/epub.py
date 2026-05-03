@@ -34,7 +34,14 @@ def _figure_blocks(doc: Document) -> list[Block]:
     return out
 
 
-def _emit_figure_images(book: epub.EpubBook, doc: Document) -> None:
+def _emit_figure_images(
+    book: epub.EpubBook,
+    doc: Document,
+    *,
+    image_format: str = "jpeg",
+    image_max_dim: int = 1000,
+    image_grayscale: bool = False,
+) -> None:
     """Render figure crops from the source PDF and add them as EPUB images."""
     figures = _figure_blocks(doc)
     if not figures or not doc.source_pdf:
@@ -48,9 +55,15 @@ def _emit_figure_images(book: epub.EpubBook, doc: Document) -> None:
     except Exception:
         return
 
+    fmt = image_format.lower()
+    if fmt not in ("jpeg", "png"):
+        fmt = "jpeg"
+    ext = "jpg" if fmt == "jpeg" else "png"
+    media = "image/jpeg" if fmt == "jpeg" else "image/png"
+
     by_page: dict[int, list[Block]] = {}
     for i, b in enumerate(figures, start=1):
-        b.image_href = f"images/figure_{i:04d}.png"
+        b.image_href = f"images/figure_{i:04d}.{ext}"
         # Stash a sanitized uid (used for OPF item id; must be a valid
         # XML NCName — no '/' or ':' allowed).
         setattr(b, "_image_uid", f"img_{i:04d}")
@@ -81,19 +94,34 @@ def _emit_figure_images(book: epub.EpubBook, doc: Document) -> None:
                 if x2 <= x1 or y2 <= y1:
                     continue
                 crop = pil_img.crop((x1, y1, x2, y2))
-                # Downscale very large figures.
-                cw, ch = crop.size
-                m = max(cw, ch)
-                if m > FIGURE_MAX_DIM:
-                    s = FIGURE_MAX_DIM / m
-                    crop = crop.resize((int(cw * s), int(ch * s)))
+                cw, ch_ = crop.size
+                m = max(cw, ch_)
+                if m > image_max_dim:
+                    s = image_max_dim / m
+                    crop = crop.resize((int(cw * s), int(ch_ * s)))
+                if image_grayscale:
+                    crop = crop.convert("L")
                 buf = BytesIO()
-                crop.save(buf, format="PNG", optimize=True)
+                if fmt == "jpeg":
+                    if crop.mode not in ("L", "RGB"):
+                        crop = crop.convert("RGB")
+                    # Baseline (non-progressive) JPEG: required by e-ink readers
+                    # like XTEINK X4 / Cross Point firmware whose ESP32-C3
+                    # decoder cannot handle progressive JPEG.
+                    crop.save(
+                        buf,
+                        format="JPEG",
+                        optimize=True,
+                        progressive=False,
+                        quality=85,
+                    )
+                else:
+                    crop.save(buf, format="PNG", optimize=True)
                 book.add_item(
                     epub.EpubImage(
                         uid=getattr(b, "_image_uid", f"img_{id(b):x}"),
                         file_name=b.image_href,
-                        media_type="image/png",
+                        media_type=media,
                         content=buf.getvalue(),
                     )
                 )
@@ -101,7 +129,14 @@ def _emit_figure_images(book: epub.EpubBook, doc: Document) -> None:
         pdf_doc.close()
 
 
-def build_epub(doc: Document, output_path: str) -> None:
+def build_epub(
+    doc: Document,
+    output_path: str,
+    *,
+    image_format: str = "jpeg",
+    image_max_dim: int = 1000,
+    image_grayscale: bool = False,
+) -> None:
     book = epub.EpubBook()
 
     book.set_identifier(f"urn:uuid:{uuid.uuid4()}")
@@ -119,7 +154,13 @@ def build_epub(doc: Document, output_path: str) -> None:
     book.add_item(css_item)
 
     # Emit figure images first so chapters can reference them via image_href.
-    _emit_figure_images(book, doc)
+    _emit_figure_images(
+        book,
+        doc,
+        image_format=image_format,
+        image_max_dim=image_max_dim,
+        image_grayscale=image_grayscale,
+    )
 
     chapter_items: list[epub.EpubHtml] = []
     for i, chapter in enumerate(doc.chapters, start=1):

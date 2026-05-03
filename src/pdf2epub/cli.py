@@ -53,6 +53,27 @@ def _build_parser() -> argparse.ArgumentParser:
         help="挿絵（図表）をEPUBに埋め込まない（テキストのみ）",
     )
     p.add_argument(
+        "--image-format",
+        choices=["jpeg", "png"],
+        default="jpeg",
+        help=(
+            "挿絵の画像形式 (default: jpeg, baseline)。"
+            "JPEG はXTEINK X4 / Cross Point 等の e-ink リーダーで確実に表示できる。"
+            "PNG にすると透過は保てるが古いリーダーで表示されないことがある"
+        ),
+    )
+    p.add_argument(
+        "--image-max-dim",
+        type=int,
+        default=1000,
+        help="挿絵の長辺ピクセル上限 (default: 1000)。e-ink向けは 800 程度を推奨",
+    )
+    p.add_argument(
+        "--image-grayscale",
+        action="store_true",
+        help="挿絵をグレースケールで保存 (e-inkリーダーでファイルサイズ削減)",
+    )
+    p.add_argument(
         "--reverse-pages",
         action="store_true",
         help="PDFが物理本の最終ページから先頭へ逆順にスキャンされている場合に指定",
@@ -212,7 +233,13 @@ def main(argv: list[str] | None = None) -> int:
         _dump_debug_html(doc, args.debug_html)
         print(f"[pdf2epub] 中間XHTML: {args.debug_html}", file=sys.stderr)
 
-    build_epub(doc, args.output)
+    build_epub(
+        doc,
+        args.output,
+        image_format=args.image_format,
+        image_max_dim=args.image_max_dim,
+        image_grayscale=args.image_grayscale,
+    )
     print(f"[pdf2epub] EPUB 出力: {args.output}", file=sys.stderr)
     return 0
 
