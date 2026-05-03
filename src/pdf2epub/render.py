@@ -1,8 +1,25 @@
 from __future__ import annotations
 
+import re
 from xml.sax.saxutils import escape
 
 from pdf2epub.model import Block, Chapter, Document, RubyRun, TextRun
+
+# Yomitoku frequently misreads ASCII '-' as the long-vowel mark 'ー' next to
+# digits (e.g. "ー1000/500=ー2"). Restore the minus sign in numeric contexts.
+_FALSE_MINUS_RE = re.compile(r"(?<=[=()\s\d/])ー(?=\d)|ー(?=\d)|(?<=\d)ー(?=[=)])")
+
+
+def _fix_text(text: str, direction: str) -> str:
+    text = _FALSE_MINUS_RE.sub("-", text)
+    # Collapse the original PDF column wrap. Vertical Japanese text reads as
+    # one continuous stream; in horizontal text, replace wrap with a space so
+    # English words don't run together.
+    if direction == "vertical":
+        text = text.replace("\n", "")
+    else:
+        text = re.sub(r"\s*\n\s*", " ", text)
+    return text
 
 
 XHTML_TEMPLATE = (
@@ -19,10 +36,10 @@ XHTML_TEMPLATE = (
 )
 
 
-def _render_run_with_rubies(run: TextRun) -> str:
+def _render_run_with_rubies(run: TextRun, direction: str = "vertical") -> str:
+    text = _fix_text(run.text, direction)
     if not run.rubies:
-        return escape(run.text)
-    text = run.text
+        return escape(text)
     out: list[str] = []
     cursor = 0
     for ruby in run.rubies:
@@ -62,7 +79,10 @@ def _block_attrs(block: Block, doc_writing_mode: str) -> str:
 def _render_block(block: Block, doc_writing_mode: str = "vertical") -> str:
     if block.role == "figure":
         return _render_figure(block)
-    inner = "".join(_render_run_with_rubies(r) for r in block.runs)
+    inner = "".join(
+        _render_run_with_rubies(r, block.direction or doc_writing_mode)
+        for r in block.runs
+    )
     attrs = _block_attrs(block, doc_writing_mode)
     if block.role == "heading":
         level = max(1, min(block.level or 1, 6))
@@ -97,6 +117,11 @@ def render_chapter_xhtml(
         title=escape(chapter.title or ""),
         body=body,
     )
+
+
+def fix_text(text: str, direction: str = "vertical") -> str:
+    """Public helper for tests."""
+    return _fix_text(text, direction)
 
 
 def render_colophon_xhtml(doc: Document) -> str:

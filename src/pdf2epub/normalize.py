@@ -497,6 +497,7 @@ def build_document(
             if block is not None:
                 blocks.append(block)
 
+    blocks = _drop_orphan_kana_blocks(blocks)
     blocks = _merge_continuation_paragraphs(blocks)
 
     chapters = _split_into_chapters(blocks)
@@ -515,6 +516,23 @@ def build_document(
 
 
 _SENTENCE_END_RE = re.compile(r"[。．！？\?\!」』）)】〕\]…]\s*$")
+
+
+def _drop_orphan_kana_blocks(blocks: list[Block]) -> list[Block]:
+    """Remove paragraph blocks that consist of nothing but a short kana run.
+
+    These are leftover ruby candidates that didn't find a parent during
+    word-bbox attachment. Showing them as standalone <p>(つぶ)</p>-style
+    fragments is more confusing than just dropping them.
+    """
+    out: list[Block] = []
+    for b in blocks:
+        if b.role == "paragraph" and b.runs and not any(r.rubies for r in b.runs):
+            text = "".join(r.text for r in b.runs).strip()
+            if 0 < len(text) <= MAX_RUBY_CHARS and KANA_ONLY.match(text):
+                continue
+        out.append(b)
+    return out
 
 
 def _merge_continuation_paragraphs(blocks: list[Block]) -> list[Block]:
@@ -555,6 +573,9 @@ def _normalize_title(text: str) -> str:
 
 
 def _split_into_chapters(blocks: list[Block]) -> list[Chapter]:
+    # Demote headings whose text reads like a sentence (mid-body OCR mis-class).
+    blocks = _demote_sentence_like_headings(blocks)
+
     chapters: list[Chapter] = []
     current: Chapter | None = None
     has_heading = any(b.role == "heading" for b in blocks)
@@ -580,7 +601,86 @@ def _split_into_chapters(blocks: list[Block]) -> list[Chapter]:
                 chapters.append(current)
             current.blocks.append(b)
 
+    chapters = _collapse_toc_clusters(chapters)
+    chapters = _label_note_section(chapters)
     return _merge_thin_chapters(chapters)
+
+
+_HEADING_SENTENCE_RE = re.compile(r"[。」』）)】〕\]…]\s*$")
+
+
+def _demote_sentence_like_headings(blocks: list[Block]) -> list[Block]:
+    """If a paragraph that Yomitoku tagged as section_headings actually ends
+    with a sentence-final mark, treat it as body. This catches cases where
+    the OCR misclassified the tail of a vertical column as a heading
+    (e.g. `そして cは光の速度だ。`)."""
+    out: list[Block] = []
+    for b in blocks:
+        if b.role == "heading" and b.runs:
+            text = b.runs[0].text.strip()
+            if _HEADING_SENTENCE_RE.search(text):
+                out.append(
+                    Block(
+                        role="paragraph",
+                        level=0,
+                        runs=b.runs,
+                        direction=b.direction,
+                    )
+                )
+                continue
+        out.append(b)
+    return out
+
+
+_NUMBER_ONLY_CHAPTER_RE = re.compile(
+    r"^\s*\d{0,4}\s*第[一二三四五六七八九十百千零〇\d]+章\s*$"
+)
+_NOTE_PARA_RE = re.compile(r"^\s*\d{0,4}\s*[\(（]\d+[\)）]")
+
+
+def _label_note_section(chapters: list[Chapter]) -> list[Chapter]:
+    """If a "第N章" with no chapter name carries paragraphs that begin with
+    "(1)" "(2)" ... it's the back-of-book endnotes for that chapter.
+    Prefix the title with "註" so the TOC distinguishes it from the body
+    chapter that already used the same number.
+    """
+    for ch in chapters:
+        if not _NUMBER_ONLY_CHAPTER_RE.match(ch.title):
+            continue
+        # Find the first non-heading paragraph.
+        first_body = next((b for b in ch.blocks if b.role != "heading"), None)
+        if first_body is None or not first_body.runs:
+            continue
+        text = first_body.runs[0].text.lstrip()
+        if _NOTE_PARA_RE.match(text):
+            ch.title = f"註 {ch.title}"
+    return chapters
+
+
+def _collapse_toc_clusters(chapters: list[Chapter]) -> list[Chapter]:
+    """Fold long runs of body-less headings (a TOC, an inner front-matter,
+    a numbered list of chapter titles) back into the previous chapter."""
+    out: list[Chapter] = []
+    cluster: list[Chapter] = []
+    THRESHOLD = 3
+    for ch in chapters:
+        body_count = sum(1 for b in ch.blocks if b.role != "heading")
+        if body_count == 0:
+            cluster.append(ch)
+            continue
+        if len(cluster) >= THRESHOLD and out:
+            for c in cluster:
+                out[-1].blocks.extend(c.blocks)
+        else:
+            out.extend(cluster)
+        cluster = []
+        out.append(ch)
+    if len(cluster) >= THRESHOLD and out:
+        for c in cluster:
+            out[-1].blocks.extend(c.blocks)
+    else:
+        out.extend(cluster)
+    return out
 
 
 def _merge_thin_chapters(chapters: list[Chapter]) -> list[Chapter]:
